@@ -18,10 +18,13 @@ class PurePursuit(Node):
         self.declare_parameter("waypoint_path", "/sim_ws/install/waypoint/share/waypoint/f1tenth_waypoint_generator/racelines/f1tenth_waypoint.csv")
         self.declare_parameter("lookahead_dist", 1.0)
         self.declare_parameter("max_speed", 4.0)
-        
+        self.declare_parameter("max_steering_angle", 0.35)
+
+
         self.csv_path = self.get_parameter("waypoint_path").value
         self.L = self.get_parameter("lookahead_dist").value
         self.max_speed = self.get_parameter("max_speed").value
+        self.steering_limit = self.get_parameter("max_steering_angle").value
         
         # --- 2. Load Data ---
         self.waypoints = self.load_waypoints(self.csv_path)
@@ -161,14 +164,24 @@ class PurePursuit(Node):
         return math.atan((2 * wheelbase * target_y_local) / (lookahead_dist**2))
 
     def publish_drive(self, angle):
-        speed = self.max_speed
-        # Giảm tốc khi cua gấp (> 20 độ)
-        if abs(angle) > 0.35: 
-            speed *= 0.5 
-            
         msg = AckermannDriveStamped()
+        
+        # 1. CLAMP (Kẹp góc lái trong giới hạn an toàn)
+        # Nếu angle > 0.35 -> về 0.35. Nếu < -0.35 -> về -0.35
+        # Hàm này tương đương clamp(angle, -limit, limit)
+        safe_angle = max(min(angle, self.steering_limit), -self.steering_limit)
+        
+        msg.drive.steering_angle = float(safe_angle)
+
+        # 2. Speed Logic (Dựa trên góc lái THỰC TẾ muốn bẻ)
+        # Lưu ý: Nếu góc lái bị clamp (tức là cua rất gắt), ta VẪN nên giảm tốc
+        speed = self.max_speed
+        
+        # Nếu góc tính toán lớn hơn hoặc bằng giới hạn -> Giảm tốc
+        if abs(angle) >= self.steering_limit: 
+            speed *= 0.5
+
         msg.drive.speed = float(speed)
-        msg.drive.steering_angle = float(angle)
         self.drive_pub.publish(msg)
 
     def stop_vehicle(self):
